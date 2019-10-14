@@ -1,0 +1,146 @@
+<!--
+This is used to pull metrics Partitioned by Campus and Schedule.
+Can be used for all metrics of this partition scheme to show
+Year over year comparisons monthly.
+-->
+<style>
+.panel-default > .panel-heading {
+     background-color: #325974 !important;
+     color: white;
+}
+.panel-info > .panel-heading {
+     background-color: #6CAFDD !important;
+     color: white;
+}
+.panel-warning > .panel-heading {
+     background-color: #EFAC45 !important;
+     color: white;
+}
+.panel-success > .panel-heading {
+     background-color: #00B374 !important;
+     color: white;
+}
+.panel-danger > .panel-heading {
+     background-color: #F15B40 !important;
+     color: white;
+}
+
+</style>
+{% sql %}
+DECLARE @Temp TABLE (campus VARCHAR(20), year INT, month INT, monthword VARCHAR(20), current_year_total DECIMAL(18,2))
+
+INSERT INTO @Temp
+Select c.Name as Campus
+, DATEPART(YEAR, mv.MetricValueDateTime)
+, DATEPART(MONTH, mv.MetricValueDateTime)
+, FORMAT(mv.MetricValueDateTime, 'MMMM')
+, SUM(mv.YValue)
+FROM MetricValue mv
+Join Metric as m on mv.MetricId = m.Id
+Join MetricValuePartition mvpSchedule on mvpSchedule.MetricValueId = mv.Id
+Join MetricPartition as mpSchedule on mpSchedule.Id = mvpSchedule.MetricPartitionId
+Join EntityType as etSchedule on etSchedule.Id = mpSchedule.EntityTypeId and etSchedule.FriendlyName = 'Schedule'
+Join Schedule as s on s.Id = mvpSchedule.EntityId
+Join MetricValuePartition mvpCampus on mvpCampus.MetricValueId = mv.Id
+Join MetricPartition as mpCampus on mpCampus.Id = mvpCampus.MetricPartitionId
+Join EntityType as etCampus on etCampus.Id = mpCampus.EntityTypeId and etCampus.FriendlyName = 'Campus'
+Join Campus as c on c.Id = mvpCampus.EntityId
+Where m.Id = 446 --528 HSM -- 520 JRH
+GROUP BY
+DATEPART(YEAR, mv.MetricValueDateTime)
+, DATEPART(MONTH, mv.MetricValueDateTime)
+, FORMAT(mv.MetricValueDateTime, 'MMMM')
+, c.Name
+
+--SELECT * FROM @Temp
+
+SELECT
+ t1.campus 'Campus'
+, t1.year 'Year'
+, t1.month 'Month'
+, t1.monthword 'MonthWord'
+, (SELECT current_year_total FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month AND t1.Campus = t2.Campus) 'LastYear'
+, t1.current_year_total 'CurrentYear'
+, t1.current_year_total - (SELECT t2.current_year_total FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month AND t1.Campus = t2.Campus) 'Difference'
+, CONVERT(DECIMAL(18,2),((t1.current_year_total - (SELECT t2.current_year_total FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month AND t1.Campus = t2.Campus)) / (SELECT t2.current_year_total FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month AND t1.Campus = t2.Campus)) * 100)  'Percent'
+, CASE WHEN t1.current_year_total < (SELECT t2.current_year_total FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month AND t1.Campus = t2.Campus) THEN 'Down' ELSE 'Up' END 'Direction'
+FROM @Temp t1
+WHERE t1.year = DATEPART(YEAR, GETDATE())
+AND t1.month = DATEPART(MONTH, DATEADD(MONTH, -1,GETDATE()))
+AND t1.Campus IS NOT NULL
+
+UNION
+SELECT
+ 'All Campuses' 'Campus'
+, t1.year 'Year'
+, t1.month 'Month'
+, t1.monthword 'MonthWord'
+, (SELECT SUM(current_year_total) FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month) 'LastYear'
+, SUM(t1.current_year_total) 'CurrentYear'
+, SUM(t1.current_year_total) - (SELECT SUM(t2.current_year_total) FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month) 'Difference'
+, CONVERT(DECIMAL(18,2),((SUM(t1.current_year_total) - (SELECT SUM(t2.current_year_total) FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month)) / (SELECT SUM(t2.current_year_total) FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month)) * 100)  'Percent'
+, CASE WHEN SUM(t1.current_year_total) < (SELECT SUM(t2.current_year_total) FROM @Temp t2 WHERE t2.year = t1.year - 1 AND t2.month = t1.month) THEN 'Down' ELSE 'Up' END 'Direction'
+FROM @Temp t1
+WHERE t1.year = DATEPART(YEAR, GETDATE())
+AND t1.month = DATEPART(MONTH, DATEADD(MONTH, -1,GETDATE()))
+GROUP BY t1.year, t1.month, t1.monthword
+{% endsql %}
+
+<div class='row'>
+<center><h1>Adult Headcount Attendance</h1></center>
+{% for item in results %}
+<div class='col-xs-4'>
+{% if item.Campus == 'Apple Valley' %}
+<div class="panel panel-warning">
+{% elseif item.Campus == 'Victorville' %}
+<div class="panel panel-info">
+{% elseif item.Campus == 'Phelan' %}
+<div class="panel panel-success">
+{% elseif item.Campus == 'Hesperia' %}
+<div class="panel panel-danger">
+{% else %}
+<div class="panel panel-default">
+{% endif %}
+
+<div class="panel-heading">
+<center>{{ item.Campus }}</center>
+</div> <!-- Panel Heading -->
+<div class="panel-body">
+<div class='row'>
+<div class='col-xs-8'>
+    <center>
+    {{ item.MonthWord }} {{ item.Year }}<br>
+    <h1>{{ item.CurrentYear | Format:'#,##0.00' }}</h1>
+    <h5>{{ item.LastYear | Format:'#,##0.00' }}</h5>
+    </center>
+    </div> <!-- Col 8 div-->
+
+    <div class='col-xs-4'>
+
+    {% if item.Direction == 'Up' %}
+    <center>
+    <div style="color: #00cc00">
+    <i class='fa fa-chevron-up fa-5x'></i><br>
+    {{ item.Difference | Format:'#,##0.00' }}<br>
+    {{ item.Percent }}%
+    </div>
+    </center>
+    {% elseif item.Direction == 'Down' %}
+    <center>
+    <div style="color: #FF0000">
+    <i class='fa fa-chevron-down fa-5x'></i><br>
+    {{ item.Difference }}<br>
+    {{ item.Percent }}%
+    </div>
+    </center>
+    {% endif %}
+
+    </div> <!-- Col 4 div-->
+
+    </div> <!-- Inside Row-->
+    </div> <!-- Panel Body-->
+</div> <!-- Panel -->
+</div> <!-- Col -->
+{% endfor %}
+
+</div> <!-- Row -->
